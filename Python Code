@@ -1,0 +1,88 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+from datetime import timedelta
+from pandas.plotting import register_matplotlib_converters
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from scipy.stats import mannwhitneyu
+register_matplotlib_converters()
+from time import time
+
+
+def parser(s):
+    return datetime.strptime(s, '%m-%d-%Y')
+    
+    
+cases = pd.read_csv('communicable_disease.csv', parse_dates=[0], index_col=0, squeeze=True)
+cases.head()
+
+start_date = datetime(2016,1,1)
+end_date = datetime(2019,12,1)
+cases_limit = cases[start_date:end_date]['Infulenza']
+len(cases_limit)
+
+plt.figure(figsize=(10,4))
+plt.plot(cases_limit)
+plt.title('Influenza hospitalization in 2016-2019', fontsize=20)
+plt.ylabel('Cases', fontsize=16)
+for year in range(start_date.year,end_date.year):
+    plt.axvline(pd.to_datetime(str(year)+'-01-01'), color='k', linestyle='--', alpha=0.2)
+
+warnings.filterwarnings("ignore")
+plt.style.use('fivethirtyeight')
+matplotlib.rcParams['axes.labelsize'] = 14
+matplotlib.rcParams['xtick.labelsize'] = 12
+matplotlib.rcParams['ytick.labelsize'] = 12
+matplotlib.rcParams['text.color'] = 'g'
+
+rcParams['figure.figsize'] = 18, 8
+decomposition = sm.tsa.seasonal_decompose(cases_limit, model='multiplicative')
+fig = decomposition.plot()
+
+p = d = q = range(0, 2)
+pdq = list(itertools.product(p, d, q))
+seasonal_pdq = [(x[0], x[1], x[2], 12) for x in list(itertools.product(p, d, q))]
+print('Examples of parameter for SARIMA...')
+print('SARIMAX: {} x {}'.format(pdq[1], seasonal_pdq[1]))
+print('SARIMAX: {} x {}'.format(pdq[1], seasonal_pdq[2]))
+print('SARIMAX: {} x {}'.format(pdq[2], seasonal_pdq[3]))
+print('SARIMAX: {} x {}'.format(pdq[2], seasonal_pdq[4]))
+
+for param in pdq:
+    for param_seasonal in seasonal_pdq:
+        try:
+            mod = sm.tsa.statespace.SARIMAX(cases_limit,order=param,seasonal_order=param_seasonal,enforce_stationarity=False,enforce_invertibility=False)
+            results = mod.fit()
+            print('ARIMA{}x{}12 - AIC:{}'.format(param,param_seasonal,results.aic))
+        except: 
+            continue
+            
+mod = sm.tsa.statespace.SARIMAX(cases_limit,
+                                order=(0, 1, 1),
+                                seasonal_order=(1, 1, 1, 12),
+                                enforce_stationarity=False,
+                                enforce_invertibility=False) 
+results = mod.fit()
+print(results.summary().tables[1]) 
+
+results.plot_diagnostics(figsize=(18, 8))
+
+pred = results.get_prediction(start=pd.to_datetime('2019-06-01'), dynamic=False)
+pred_ci = pred.conf_int()
+ax = cases_limit['2016':].plot(label='observed')
+pred.predicted_mean.plot(ax=ax, label='One-step ahead Forecast', alpha=.7, figsize=(14, 4))
+ax.fill_between(pred_ci.index,
+                pred_ci.iloc[:, 0],
+                pred_ci.iloc[:, 1], color='k', alpha=.2)
+ax.set_xlabel('Date')
+ax.set_ylabel('Influenza cases')
+plt.legend()
+plt.tight_layout()
+
+y_forecasted = pred.predicted_mean
+y_truth = cases_limit['2019-06-01':]
+mse = ((y_forecasted - y_truth) ** 2).mean()
+print('The Mean Squared Error is {}'.format(round(mse, 2)))
+print('The Root Mean Squared Error is {}'.format(round(np.sqrt(mse), 2)))
